@@ -1,0 +1,222 @@
+<!doctype html>
+<html>
+<head>
+    <title>chat</title>
+	
+	<link rel="stylesheet" href="static/lib/bootstrap/css/bootstrap.min.css">
+	<link rel="stylesheet" href="static/css/chat.css">
+	
+	<script src="static/lib/jquery-1.11.1.js"></script>
+	<script src="static/tether.min.js"></script><!-- fix Bootstrap tooltips require Tether -->
+	<script src="static/lib/bootstrap/js/bootstrap.min.js"></script>
+	<script src="/socket.io/socket.io.js"></script>
+	<script>
+	var uuid = generateUUID();
+	console.log(uuid);
+	
+	const USER_STORAGE = "user_storage";
+	
+	$(function () {
+		var socket = io();
+		
+		if (supportSessionStorage) {
+			var user_storage = sessionStorage.getItem(USER_STORAGE);
+			if (user_storage) {
+				var userObj = JSON.parse(user_storage);
+				socket.emit('input name', JSON.stringify(userObj));
+			} else {
+				$('#inputNameModal').modal('toggle');
+			}
+		} else {
+			$('#inputNameModal').modal('toggle');
+		}
+		
+		$('#nameForm').submit(function(e) {
+			e.preventDefault();
+			
+			var userObj = {
+				uuid : uuid,
+				name : $.trim($('#inputName').val())
+			}
+			socket.emit('input name', JSON.stringify(userObj));
+			
+			$('#inputNameModal').modal('hide');
+			
+			sessionStorage.setItem(USER_STORAGE, JSON.stringify(userObj));
+		});
+		
+		socket.on('get online list', function(string){
+			console.log(string);
+			var onlineList = JSON.parse(string);
+			$.each(onlineList, function(index, userObj) {
+				$("#users").append("<div><span uuid='"+ userObj.uuid +"'>"+ userObj.name +"</span><br/></div>");
+			});
+		});
+		
+		socket.on('someone in', function(string){
+			console.log(string);
+			var userObj = JSON.parse(string);
+			console.log(userObj.name);
+			
+			$("#users").append("<div><span uuid='"+ userObj.uuid +"'>"+ userObj.name +"</span><br/></div>");
+		});
+		
+		socket.on('someone out', function(uuid){
+			console.log(uuid);
+			
+			$.each($("#users span"), function(index, span) {
+				var span_uuid = span.getAttribute("uuid");
+				console.log(span_uuid);
+				
+				if (uuid == span_uuid) {
+					span.parentNode.parentNode.removeChild(span.parentNode);
+				}
+			});
+		});
+		
+		$('#send-message').submit(function(e){
+			e.preventDefault();
+			socket.emit('send message', $("#message").val().trim());
+			$("#message").val('');
+	    });
+		
+		socket.on('chat message', function(string){
+			console.log(string);
+			var chatObj = JSON.parse(string);
+			console.log(chatObj);
+
+			$("#chat").append("<b>" + chatObj.name + " </b>: ")
+					.append(chatObj.msg)
+					.append("<span style='float:right'>(" + getNow() + ")</span><br />");
+			
+		});
+		
+		$('#send-message').on("drop", function(ev) {
+			ev.preventDefault();
+			//停止開啟檔案及其他動作
+			ev.stopPropagation();
+			// 取得拖曳檔案
+			var filelist = event.dataTransfer.files;
+			for(var i = 0; i < filelist.length ; i++ ) {
+				var file = filelist[i];
+				console.log(file.name);
+				var ext = file.name.substring(file.name.indexOf('.')+1).toUpperCase();
+				if (isNotImage(ext)) {
+					alert("support image file only.");
+					continue;
+				}
+				
+				//讀取檔案
+				var reader = new FileReader();
+				reader.onload = function(evt){
+					//evt.target.result contains the image in base64 format
+					socket.emit('drop image', evt.target.result);
+				};
+				//read the image and base64
+				reader.readAsDataURL(file);  
+			}
+		});
+		
+		socket.on('image', image);
+		function image (base64Image, name) {
+			$('#chat').append("<b>" + name + " </b>: ")
+					.append('<img src="' + base64Image + '"/>')
+					.append("<span style='float:right'>(" + getNow() + ")</span><br />");
+		};
+		
+		//auto-scrolling
+		window.setInterval(function() {
+			var elem = document.getElementById('chat');
+			elem.scrollTop = elem.scrollHeight;
+		}, 100);
+	});
+	
+	function generateUUID() {
+		var d = new Date().getTime();
+		var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+			var r = (d + Math.random()*16)%16 | 0;
+			d = Math.floor(d/16);
+			return (c=='x' ? r : (r&0x3|0x8)).toString(16);
+		});
+		return uuid;
+	};
+	
+	function getNow() {
+		var now = new Date();
+		var datetime = now.getFullYear()+'/'+(now.getMonth()+1)+'/'+now.getDate();
+		datetime += ' '+now.getHours()+':'+now.getMinutes()+':'+now.getSeconds();
+		return datetime;
+	}
+	
+	function isNotImage(ext) {
+		return ["ANI", "BMP", "CAL", "FAX", "GIF", "IMG", "JBG", "JPE", "JPEG", "JPG", "MAC", "PBM", 
+		 "PCD", "PCX", "PCT", "PGM", "PNG", "PPM", "PSD", "RAS", "TGA", "TIFF", "WMF"].indexOf(ext) == -1;
+	}
+	
+	function supportSessionStorage() {
+		try {
+			return 'sessionStorage' in window && window['sessionStorage'] !== null;
+		} catch (e) {
+			return false;
+		}
+	}
+	</script>
+	
+</head>
+<body>
+	<div class="container">
+
+		<div id="chatWrap" class="panel panel-default">
+			<div class="panel-heading">即時聊天</div>
+			<div class="panel-body">
+				<div class="row">
+					<div class="col-md-9">
+						<div id="chat" class="break"></div>
+						<br />
+						<form id="send-message">
+							<div class="input-group">
+								<input type="text" class="form-control" placeholder="請輸入聊天訊息或拖曳圖片..." id="message">
+								<span class="input-group-btn">
+									<button type="submit" class="btn btn-default">送出留言</button>
+								</span>
+							</div>
+						</form>
+					</div>
+					<div class="col-md-3">
+						線上名單：
+						<div id="users"></div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		
+	</div>
+	
+	<!-- modal -->
+
+	<div class="modal fade" data-backdrop="static" id="inputNameModal" tabindex="-1" role="dialog"
+		aria-labelledby="inputNameModalLabel" aria-hidden="true">
+		<div class="modal-dialog" role="document">
+			<div class="modal-content">
+			<form id="nameForm" role="form">
+				<div class="modal-header">
+				</div>
+				<div class="modal-body">					
+					<h2 class="form-signin-heading">請輸入您的名字開始聊天:</h2>
+					<p id="nickError"></p>
+					<div style="margin: 20px;">
+						<input class="form-control" size="35" id="inputName" required="" />
+					</div>
+				</div>
+				<div class="modal-footer">
+					<button type="Submit" class="btn btn-primary">傳送</button>
+				</div>
+			</form>
+			</div>
+		</div>
+	</div>
+	
+	
+</body>
+</html>
